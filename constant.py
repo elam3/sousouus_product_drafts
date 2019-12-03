@@ -1,0 +1,2 @@
+SIMPLE = "simple"
+VARIABLE = "variable"
