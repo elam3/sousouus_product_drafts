@@ -4,7 +4,7 @@ from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from pathlib import Path
 import os
-from woocommerce import API
+from woocommerce import API as WC_API
 import re
 import json
 import constant
@@ -77,11 +77,11 @@ def main():
         # i.e. images that are captions turned jpg
         if width/height < 5:
             imageLinks.append(imageLink)
-
-
-    # TODO: Size Attributes
-    # TODO: Product Categories
-    # TODO: Text translations
+    imageLinks.sort()
+    #/usr/local/bin/wp --path=/public_html media import ${imageLink} --post_id=${WP_POST_ID}
+    # --featured_image
+    #print(f'/usr/local/bin/wp --path=/public_html media import {imgs[0]} --featured-image --post_id=123')
+    #print(f'/usr/local/bin/wp --path=/public_html media import {" ".join(imgs[1:])} --post_id=123')
 
 
     # Fetch Product Description
@@ -92,6 +92,11 @@ def main():
         exit(13)
     else:
         productDesc = productDesc[0]
+
+
+    # TODO: Size Attributes
+    # TODO: Product Categories
+    # TODO: Text translations
 
 
     # Grab product metadata; e.g. product_code, price, etc.
@@ -107,27 +112,33 @@ def main():
     productCode = metadata['product']['model_number']
     variants = metadata['product']['variants']
     productType = ""
+
     if len(variants) == 1: # e.g. simple product
+        # TODO: Simple Product
         productType = constant.SIMPLE
     else: # e.g. variable product
+        # TODO: Variable Product
         productType = constant.VARIABLE
         productChildren = list()
         for variant in variants:
             child = dict()
             sku12 = "1" + variant['model_number']
             sku = sku12 + calc_check_digit(sku12)
+            sizeCode = sku[10:12]
             child['sku'] = sku
             child['regular_price'] = str(variant['option_price'])
-            sizeCode = sku[10:12]
-            #TODO: attribute code?
-            #child['attributes'] = []
             child['managing_stock'] = True
             child['stock_quantity'] = 0
             child['in_stock'] = False
+            child['attributes'] = [{
+                'name': 'Size',
+                'option': getAttributeOption(sizeCode),
+                'slug': 'size-new'
+            }]
             productChildren.append(child)
 
     # Create a product via WooCommerce API
-    wcapi = API(
+    wcapi = WC_API(
         url="https://www.sousouus.com",
         consumer_key=wcapi_key,
         consumer_secret=wcapi_secret,
