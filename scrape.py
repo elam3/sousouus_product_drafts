@@ -66,22 +66,22 @@ def main():
     for match in regex_matches_product_images:
         imageSet.add(match)
 
-    # Download product images
-    # & Filter out unwanted images
+    # Filter out unwanted images
+    imageLinks = list()
     for imageLink in imageSet:
-        regex_pattern_filename = re.compile('', re.MULTILINE)
-        regex_matches_filename = regex_pattern_filename.findall(imageLink)
-        imageFilename = regex_matches_filename[0]
-        r = requests.get(imageLink)
-        with open(imageFilename, 'wb') as f:
-            f.write(r.content)
-        with Image.open(filename) as img:
-            width, height = img.size
-            if width/height < 5:
-                print(f"{imagePath}: {width} x {height} px")
+        http_response = requests.get(imageLink)
+        bytesFile = io.BytesIO(http_response.content)
+        pil_img = Image.open(bytesFile)
+        width, height = pil_img.size
+        # Ignore significantly wide and short images.
+        # i.e. images that are captions turned jpg
+        if width/height < 5:
+            imageLinks.append(imageLink)
 
 
-    # TODO
+    # TODO: Size Attributes
+    # TODO: Product Categories
+    # TODO: Text translations
 
 
     # Fetch Product Description
