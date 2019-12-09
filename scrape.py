@@ -8,6 +8,8 @@ from woocommerce import API
 import re
 import json
 import constant
+from PIL import Image
+import io
 
 #TODO: Revisit error handling
 
@@ -31,27 +33,56 @@ import constant
 
 def main():
     # Read api key/secret
-    env_path = Path('.') / '.creds'
-    load_dotenv(env_path)
-    wapi_key = os.getenv('key')
-    os.unsetenv('key')
-    if 'key' in os.environ:
-        del os.environ['key']
-    wapi_secret = os.getenv('secret')
-    os.unsetenv('secret')
-    if 'secret' in os.environ:
-        del os.environ['secret']
+    wcapi_key, wcapi_secret = get_wooCommerce_credentials()
 
     # Build HTTP Headers
     user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:70.0) Gecko/20100101 Firefox/70.0"
     headers = {'User-Agent': user_agent}
 
-    # Fetch Product Page
+    # TODO: Scale the URL input
+    # Web scraping for product HTML page
     url = "https://www.sousou.co.jp/?pid=147050452"
     page = requests.get(url, headers=headers)
     if page.status_code != 200:
-        print("Error: Could not fetch page.", file=sys.stderr)
-        exit(page.status_code)
+        print(f"Error: HTTP {page.status_code}: Could not fetch page: {url}. Is the url correct?", file=sys.stderr)
+        exit(13)
+
+    html = page.content.decode(page.encoding)
+
+    # What is the product ID, aka pid?
+    regex_pattern_pid = re.compile('^http.*pid=([0-9]{9}).*', re.MULTILINE)
+    regex_matches_pid = regex_pattern_pid.findall(url)
+    if len(regex_matches_pid) == 0:
+        print(f"Error: trouble finding a 9-digit product id from {url}.", file=sys.stderr)
+        exit(13)
+    elif len(regex_matches_pid) > 1:
+        print(f"Warning: found more than one matches when looking for a 9-digit product id from {url}. Is the data clean?", file=sys.stderr)
+    pid = regex_matches_pid[0]
+
+    # Grab a unique list of product images urls
+    regex_pattern_product_images = re.compile(f'^.*(http.*{pid}.*jpg).*', re.MULTILINE)
+    regex_matches_product_images = regex_pattern_product_images.findall(html)
+    imageSet = set()
+    for match in regex_matches_product_images:
+        imageSet.add(match)
+
+    # Download product images
+    # & Filter out unwanted images
+    for imageLink in imageSet:
+        regex_pattern_filename = re.compile('', re.MULTILINE)
+        regex_matches_filename = regex_pattern_filename.findall(imageLink)
+        imageFilename = regex_matches_filename[0]
+        r = requests.get(imageLink)
+        with open(imageFilename, 'wb') as f:
+            f.write(r.content)
+        with Image.open(filename) as img:
+            width, height = img.size
+            if width/height < 5:
+                print(f"{imagePath}: {width} x {height} px")
+
+
+    # TODO
+
 
     # Fetch Product Description
     soup = BeautifulSoup(page.content, 'html.parser')
@@ -62,8 +93,8 @@ def main():
     else:
         productDesc = productDesc[0]
 
+
     # Grab product metadata; e.g. product_code, price, etc.
-    html = page.content.decode(page.encoding)
     metadata_pattern = re.compile('\\s+var Colorme = ({.*});$', re.MULTILINE)
     metadata_matches = metadata_pattern.findall(html)
     if len(metadata_matches) > 1:
@@ -98,8 +129,8 @@ def main():
     # Create a product via WooCommerce API
     wcapi = API(
         url="https://www.sousouus.com",
-        consumer_key=wapi_key,
-        consumer_secret=wapi_secret,
+        consumer_key=wcapi_key,
+        consumer_secret=wcapi_secret,
         version="v3"
     )
     data = {
@@ -118,6 +149,24 @@ def main():
 
 
 
+def get_wooCommerce_credentials():
+    # Read api key/secret
+    env_path = Path('.') / '.creds'
+    load_dotenv(env_path)
+    wcapi_key = os.getenv('key')
+    os.unsetenv('key')
+    if 'key' in os.environ:
+        del os.environ['key']
+    wcapi_secret = os.getenv('secret')
+    os.unsetenv('secret')
+    if 'secret' in os.environ:
+        del os.environ['secret']
+    return (wcapi_key, wcapi_secret)
+
+
+
+
+
 def calc_check_digit(number):
     """
     Calculate the EAN check digit for 13-digit numbers. The number passed
@@ -126,6 +175,9 @@ def calc_check_digit(number):
     Source: https://github.com/arthurdejong/python-stdnum/blob/master/stdnum/ean.py
     """
     return str((10 - sum((3, 1)[i % 2] * int(n) for i, n in enumerate(reversed(number)))) % 10)
+
+
+
 
 
 if __name__ == "__main__" : main()
