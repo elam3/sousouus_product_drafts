@@ -13,6 +13,7 @@ from PIL import Image
 import io
 import datetime
 import pprint
+import csv
 
 #TODO: Revisit error handling
 
@@ -45,31 +46,33 @@ def main():
     )
 
     productLinks = list()
-    productLinks.append("https://www.sousou.co.jp/?pid=144991100")
-    #productLinks.append("https://www.sousou.co.jp/?pid=115821381")
-    #productLinks.append("https://www.sousou.co.jp/?pid=127682765")
-    #productLinks.append("https://www.sousou.co.jp/?pid=146289971")
-    #productLinks.append("https://www.sousou.co.jp/?pid=115821388")
+    filename = sys.argv[1]
+    with open(filename, 'r') as csvfile:
+        csvreader = csv.reader(csvfile)
+        for row in csvreader:
+            productLinks.append(row[0])
+    pprint.PrettyPrinter(indent=4).pprint(productLinks)
 
     # TODO: Product Categories
     # TODO: Text translations
     for productLink in productLinks:
+        print(f"Status: processing {productLink}.", file=sys.stderr)
         # Collect Product Data via webscraping
-        print("Status: webscraping data.", file=sys.stderr)
+        print("\tStatus: webscraping data.", file=sys.stderr)
         html = getHTML(productLink)
-        print("Status: fetching product metadata.", file=sys.stderr)
+        print("\tStatus: fetching product metadata.", file=sys.stderr)
         metadata = getProductMetadata(html)
         variants = metadata['product']['variants']
         # Populate data for API call
-        print("Status: populaing data for api call.", file=sys.stderr)
+        print("\tStatus: populaing data for api call.", file=sys.stderr)
         product = dict()
         data = {'product': product}
         product['title'] = metadata['product']['name']
-        product['status'] = 'pending'
+        product['status'] = 'draft'
         product['regular_price'] = metadata['product']['sales_price']
         product['description'] = getProductDescription(html)
         product['enable_html_description'] = True
-        print("Status: collecting image urls.", file=sys.stderr)
+        print("\tStatus: collecting image urls.", file=sys.stderr)
         product['images'] = getProductImages(productLink, html)
         product['in_stock'] = False
         # 'short description': '',
@@ -119,11 +122,11 @@ def main():
                 })
             product['variations'] = variations_data
         # Create a product via WooCommerce API
-        print("Status: sending api call.", file=sys.stderr)
+        print("\tStatus: sending api call.", file=sys.stderr)
         response = wcapi.post("products", data)
         responseJson = response.json()
-        pprint.PrettyPrinter(indent=4).pprint(responseJson)
-        print(f'{responseJson["product"]["title"]}')
+        #pprint.PrettyPrinter(indent=4).pprint(responseJson)
+        print(f'\t{responseJson["product"]["title"]}')
         print(f'\t{response.status_code}: {response.ok}: Creating product')
 
 
@@ -163,12 +166,14 @@ def getProductDescription(html):
 def getProductImages(productLink, html):
     pid = getProductID(productLink)
     # Grab a unique list of product images urls
+    print("\tStatus: gathering image: regex.", file=sys.stderr)
     regex_pattern_product_images = re.compile(f'^.*(http.*{pid}.*jpg).*', re.MULTILINE)
     regex_matches_product_images = regex_pattern_product_images.findall(html)
     imageSet = set()
     for match in regex_matches_product_images:
         imageSet.add(match)
     # Filter out unwanted images
+    print("\tStatus: gathering image: removing unwanted images.", file=sys.stderr)
     imageLinks = list()
     for imageLink in imageSet:
         http_response = requests.get(imageLink)
@@ -179,6 +184,7 @@ def getProductImages(productLink, html):
         # i.e. images that are captions turned jpg
         if width/height < 5:
             imageLinks.append(imageLink)
+    print("\tStatus: gathering image: sort list.", file=sys.stderr)
     imageLinks.sort()
     productImages = list()
     for i in range(len(imageLinks)):
