@@ -8,8 +8,11 @@ from woocommerce import API as WC_API
 import re
 import json
 import constant
+from size_attribute_terms import product_sizes
 from PIL import Image
 import io
+import datetime
+import pprint
 
 #TODO: Revisit error handling
 
@@ -34,38 +37,137 @@ import io
 def main():
     # Read api key/secret
     wcapi_key, wcapi_secret = get_wooCommerce_credentials()
+    wcapi = WC_API(
+        url="https://www.sousouus.com",
+        consumer_key=wcapi_key,
+        consumer_secret=wcapi_secret,
+        version="v3"
+    )
 
-    # Build HTTP Headers
-    user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:70.0) Gecko/20100101 Firefox/70.0"
-    headers = {'User-Agent': user_agent}
+    productLinks = list()
+    productLinks.append("https://www.sousou.co.jp/?pid=144991100")
+    #productLinks.append("https://www.sousou.co.jp/?pid=115821381")
+    #productLinks.append("https://www.sousou.co.jp/?pid=127682765")
+    #productLinks.append("https://www.sousou.co.jp/?pid=146289971")
+    #productLinks.append("https://www.sousou.co.jp/?pid=115821388")
 
-    # TODO: Scale the URL input
-    # Web scraping for product HTML page
-    url = "https://www.sousou.co.jp/?pid=147050452"
-    page = requests.get(url, headers=headers)
-    if page.status_code != 200:
-        print(f"Error: HTTP {page.status_code}: Could not fetch page: {url}. Is the url correct?", file=sys.stderr)
+    # TODO: Product Categories
+    # TODO: Text translations
+    for productLink in productLinks:
+        # Collect Product Data via webscraping
+        print("Status: webscraping data.", file=sys.stderr)
+        html = getHTML(productLink)
+        print("Status: fetching product metadata.", file=sys.stderr)
+        metadata = getProductMetadata(html)
+        variants = metadata['product']['variants']
+        # Populate data for API call
+        print("Status: populaing data for api call.", file=sys.stderr)
+        product = dict()
+        data = {'product': product}
+        product['title'] = metadata['product']['name']
+        product['status'] = 'pending'
+        product['regular_price'] = metadata['product']['sales_price']
+        product['description'] = getProductDescription(html)
+        product['enable_html_description'] = True
+        print("Status: collecting image urls.", file=sys.stderr)
+        product['images'] = getProductImages(productLink, html)
+        product['in_stock'] = False
+        # 'short description': '',
+        # 'categories': [],
+        isSimpleProduct = True if len(variants) == 1 else False
+        if isSimpleProduct:
+            product['type'] = constant.SIMPLE
+            product['managing_stock'] = True
+            product['stock_quantity'] = 0
+            sku12 = "1" + metadata['product']['variants'][0]['model_number']
+            sku = sku12 + calc_check_digit(sku12)
+            sizeCode = sku[10:12]
+            product['sku'] = sku
+        else:
+            product['type'] = constant.VARIABLE
+            product['sku'] = metadata['product']['model_number']
+            attributes = [{
+                'name': 'Size',
+                'slug': 'size-new',
+                'variation': True,
+                'visible': False,
+                'options': list()
+            }]
+            # Add size attributes to product
+            for variant in variants:
+                sizeCode = variant['model_number'][-2:]
+                attributes[0]['options'].append(product_sizes[sizeCode]['name'])
+            product['attributes'] = attributes
+
+            # Create a product via WooCommerce API
+            variations_data = list()
+            for variant in variants:
+                sku12 = "1" + variant['model_number']
+                sku = sku12 + calc_check_digit(sku12)
+                sizeCode = sku[10:12]
+                variations_data.append({
+                    'sku': sku,
+                    'regular_price': variant['option_price_including_tax'],
+                    'managing_stock': True,
+                    'stock_quantity': 0,
+                    'in_stock': False,
+                    'attributes': [{
+                        'name': 'Size',
+                        'slug': 'size-new',
+                        'option': product_sizes[sizeCode]['slug']
+                    }]
+                })
+            product['variations'] = variations_data
+        # Create a product via WooCommerce API
+        print("Status: sending api call.", file=sys.stderr)
+        response = wcapi.post("products", data)
+        responseJson = response.json()
+        pprint.PrettyPrinter(indent=4).pprint(responseJson)
+        print(f'{responseJson["product"]["title"]}')
+        print(f'\t{response.status_code}: {response.ok}: Creating product')
+
+
+
+
+
+def getProductMetadata(html):
+    metadata_pattern = re.compile('\\s+var Colorme = ({.*});$', re.MULTILINE)
+    metadata_matches = metadata_pattern.findall(html)
+    if len(metadata_matches) > 1:
+        print("Warning: Multiple matches found when expecting one json object containing product metadata. Is the data clean?", file=sys.stderr)
+    elif len(metadata_matches) < 1:
+        print("Fatal Error: Could not locate product metadata.", file=sys.stderr)
         exit(13)
+    metadata = json.loads(metadata_matches[0])
+    return metadata
 
-    html = page.content.decode(page.encoding)
 
-    # What is the product ID, aka pid?
-    regex_pattern_pid = re.compile('^http.*pid=([0-9]{9}).*', re.MULTILINE)
-    regex_matches_pid = regex_pattern_pid.findall(url)
-    if len(regex_matches_pid) == 0:
-        print(f"Error: trouble finding a 9-digit product id from {url}.", file=sys.stderr)
+
+
+
+def getProductDescription(html):
+    # Fetch Product Description
+    #soup = BeautifulSoup(page.content, 'html.parser')
+    soup = BeautifulSoup(html, 'html.parser')
+    productDesc = soup.find('div', class_='txt')
+    if productDesc is None:
+        print("Error: Could not find product description.", file=sys.stderr)
         exit(13)
-    elif len(regex_matches_pid) > 1:
-        print(f"Warning: found more than one matches when looking for a 9-digit product id from {url}. Is the data clean?", file=sys.stderr)
-    pid = regex_matches_pid[0]
+    productDesc = str(productDesc)
+    return productDesc
 
+
+
+
+
+def getProductImages(productLink, html):
+    pid = getProductID(productLink)
     # Grab a unique list of product images urls
     regex_pattern_product_images = re.compile(f'^.*(http.*{pid}.*jpg).*', re.MULTILINE)
     regex_matches_product_images = regex_pattern_product_images.findall(html)
     imageSet = set()
     for match in regex_matches_product_images:
         imageSet.add(match)
-
     # Filter out unwanted images
     imageLinks = list()
     for imageLink in imageSet:
@@ -78,83 +180,41 @@ def main():
         if width/height < 5:
             imageLinks.append(imageLink)
     imageLinks.sort()
-    #/usr/local/bin/wp --path=/public_html media import ${imageLink} --post_id=${WP_POST_ID}
-    # --featured_image
-    #print(f'/usr/local/bin/wp --path=/public_html media import {imgs[0]} --featured-image --post_id=123')
-    #print(f'/usr/local/bin/wp --path=/public_html media import {" ".join(imgs[1:])} --post_id=123')
+    productImages = list()
+    for i in range(len(imageLinks)):
+        productImages.append( { 'src': imageLinks[i], 'position': i } )
+    return productImages
 
 
-    # Fetch Product Description
-    soup = BeautifulSoup(page.content, 'html.parser')
-    productDesc = soup.find('div', class_='txt')
-    if productDesc is None:
-        print("Error: Could not find product description.", file=sys.stderr)
+
+
+
+def getProductID(url):
+    # What is the product ID, aka pid?
+    regex_pattern_pid = re.compile('^http.*pid=([0-9]{9}).*', re.MULTILINE)
+    regex_matches_pid = regex_pattern_pid.findall(url)
+    if len(regex_matches_pid) == 0:
+        print(f"Error: trouble finding a 9-digit product id from {url}.", file=sys.stderr)
         exit(13)
-    else:
-        productDesc = productDesc[0]
+    elif len(regex_matches_pid) > 1:
+        print(f"Warning: found more than one matches when looking for a 9-digit product id from {url}. Is the data clean?", file=sys.stderr)
+    pid = regex_matches_pid[0]
+    return pid
 
 
-    # TODO: Size Attributes
-    # TODO: Product Categories
-    # TODO: Text translations
 
 
-    # Grab product metadata; e.g. product_code, price, etc.
-    metadata_pattern = re.compile('\\s+var Colorme = ({.*});$', re.MULTILINE)
-    metadata_matches = metadata_pattern.findall(html)
-    if len(metadata_matches) > 1:
-        print("Warning: Multiple matches found when expecting one json object containing product metadata. Is the data clean?", file=sys.stderr)
-    elif len(metadata_matches < 1):
-        print("Fatal Error: Could not locate product metadata.", file=sys.stderr)
+
+def getHTML(url):
+    # Build HTTP Headers
+    user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:70.0) Gecko/20100101 Firefox/70.0"
+    headers = {'User-Agent': user_agent}
+    page = requests.get(url, headers=headers)
+    if page.status_code != 200:
+        print(f"Error: HTTP {page.status_code}: Could not fetch page: {url}. Is the url correct?", file=sys.stderr)
         exit(13)
-    metadata = json.loads(metadata_matches[0])
-    productTitle = metadata['product']['name']
-    productCode = metadata['product']['model_number']
-    variants = metadata['product']['variants']
-    productType = ""
-
-    if len(variants) == 1: # e.g. simple product
-        # TODO: Simple Product
-        productType = constant.SIMPLE
-    else: # e.g. variable product
-        # TODO: Variable Product
-        productType = constant.VARIABLE
-        productChildren = list()
-        for variant in variants:
-            child = dict()
-            sku12 = "1" + variant['model_number']
-            sku = sku12 + calc_check_digit(sku12)
-            sizeCode = sku[10:12]
-            child['sku'] = sku
-            child['regular_price'] = str(variant['option_price'])
-            child['managing_stock'] = True
-            child['stock_quantity'] = 0
-            child['in_stock'] = False
-            child['attributes'] = [{
-                'name': 'Size',
-                'option': getAttributeOption(sizeCode),
-                'slug': 'size-new'
-            }]
-            productChildren.append(child)
-
-    # Create a product via WooCommerce API
-    wcapi = WC_API(
-        url="https://www.sousouus.com",
-        consumer_key=wcapi_key,
-        consumer_secret=wcapi_secret,
-        version="v3"
-    )
-    data = {
-	"product": {
-	    "title": productTitle,
-	    "type": productType,
-            "sku": productCode,
-	    "regular_price": productPrice,
-	    "description":  productDesc,
-            "variations": productChildren
-	}
-    }
-    response = wcapi.post("products", data).json()
+    html = page.content.decode(page.encoding)
+    return html
 
 
 
@@ -182,7 +242,6 @@ def calc_check_digit(number):
     """
     Calculate the EAN check digit for 13-digit numbers. The number passed
     should not have the check bit included.
-
     Source: https://github.com/arthurdejong/python-stdnum/blob/master/stdnum/ean.py
     """
     return str((10 - sum((3, 1)[i % 2] * int(n) for i, n in enumerate(reversed(number)))) % 10)
