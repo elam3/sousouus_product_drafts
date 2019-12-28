@@ -56,7 +56,7 @@ def main():
     # TODO: Product Categories
     # TODO: Text translations
     for productLink in productLinks:
-        print(f"Status: processing {productLink}.", file=sys.stderr)
+        print("Status: processing %s." % productLink, file=sys.stderr)
         # Collect Product Data via webscraping
         print("\tStatus: webscraping data.", file=sys.stderr)
         html = getHTML(productLink)
@@ -126,8 +126,8 @@ def main():
         response = wcapi.post("products", data)
         responseJson = response.json()
         #pprint.PrettyPrinter(indent=4).pprint(responseJson)
-        print(f'\t{responseJson["product"]["title"]}')
-        print(f'\t{response.status_code}: {response.ok}: Creating product')
+        print('\t%s' % responseJson["product"]["title"], file=sys.stderr)
+        print('\t%s : %s : Creating product' % (response.status_code, response.ok), file=sys.stderr)
 
 
 
@@ -200,10 +200,10 @@ def getProductID(url):
     regex_pattern_pid = re.compile('^http.*pid=([0-9]{9}).*', re.MULTILINE)
     regex_matches_pid = regex_pattern_pid.findall(url)
     if len(regex_matches_pid) == 0:
-        print(f"Error: trouble finding a 9-digit product id from {url}.", file=sys.stderr)
+        print("Error: trouble finding a 9-digit product id from %s." % url, file=sys.stderr)
         exit(13)
     elif len(regex_matches_pid) > 1:
-        print(f"Warning: found more than one matches when looking for a 9-digit product id from {url}. Is the data clean?", file=sys.stderr)
+        print("Warning: found more than one matches when looking for a 9-digit product id from %s. Is the data clean?" % url, file=sys.stderr)
     pid = regex_matches_pid[0]
     return pid
 
@@ -217,7 +217,7 @@ def getHTML(url):
     headers = {'User-Agent': user_agent}
     page = requests.get(url, headers=headers)
     if page.status_code != 200:
-        print(f"Error: HTTP {page.status_code}: Could not fetch page: {url}. Is the url correct?", file=sys.stderr)
+        print("Error: HTTP %s : Could not fetch page: %s. Is the url correct?" % (page.status_code, url), file=sys.stderr)
         exit(13)
     html = page.content.decode(page.encoding)
     return html
