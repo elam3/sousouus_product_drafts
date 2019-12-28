@@ -167,7 +167,7 @@ def getProductImages(productLink, html):
     pid = getProductID(productLink)
     # Grab a unique list of product images urls
     print("\tStatus: gathering image: regex.", file=sys.stderr)
-    regex_pattern_product_images = re.compile(f'^.*(http.*{pid}.*jpg).*', re.MULTILINE)
+    regex_pattern_product_images = re.compile('^.*(http.*{pid}.*jpg).*'.format(pid=pid), re.MULTILINE)
     regex_matches_product_images = regex_pattern_product_images.findall(html)
     imageSet = set()
     for match in regex_matches_product_images:
@@ -228,7 +228,7 @@ def getHTML(url):
 
 def get_wooCommerce_credentials():
     # Read api key/secret
-    env_path = Path('.') / '.creds'
+    env_path = '.creds'
     load_dotenv(env_path)
     wcapi_key = os.getenv('key')
     os.unsetenv('key')
