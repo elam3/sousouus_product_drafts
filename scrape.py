@@ -67,7 +67,7 @@ def main():
         print("\tStatus: populaing data for api call.", file=sys.stderr)
         product = dict()
         data = {'product': product}
-        product['title'] = metadata['product']['name']
+        product['title'] = 'Proofread ' + metadata['product']['name']
         product['status'] = 'draft'
         product['regular_price'] = metadata['product']['sales_price']
         product['description'] = getProductDescription(html)
